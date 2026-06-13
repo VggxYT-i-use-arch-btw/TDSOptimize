@@ -117,6 +117,7 @@ end
 -- ─── 3. TOWERS ──────────────────────────────────────────
 
 local processedTowers = setmetatable({}, {__mode = "k"})
+local pendingTowers   = setmetatable({}, {__mode = "k"})  -- tower → tick() de quando foi vista
 
 local TOWER_DELETE = {
     "Animations", "Display", "Queues", "Units",
@@ -160,8 +161,16 @@ end
 local function scanTowers()
     local folder = WS:FindFirstChild("Towers")
     if not folder then return end
+    local now = tick()
     for _, tower in ipairs(folder:GetChildren()) do
-        processTower(tower)
+        if not processedTowers[tower] then
+            if not pendingTowers[tower] then
+                pendingTowers[tower] = now          -- primeira vez que viu: registra
+            elseif now - pendingTowers[tower] >= 2 then
+                pendingTowers[tower] = nil
+                processTower(tower)                 -- só processa após 2s de carregamento
+            end
+        end
     end
 end
 
