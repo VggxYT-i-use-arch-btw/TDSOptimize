@@ -36,9 +36,11 @@ local function applyGlobalSettings()
     end)
 end
 
--- Limpeza global: desativa efeitos visuais pesados e força material liso
+-- Limpeza global: desativa efeitos visuais pesados e força material liso (em chunks)
 local function globalCleanup()
-    for _, d in ipairs(WS:GetDescendants()) do
+    local descendants = WS:GetDescendants()
+    local CHUNK = 80
+    for i, d in ipairs(descendants) do
         pcall(function()
             if  d:IsA("ParticleEmitter") or d:IsA("Fire")
             or  d:IsA("Smoke") or d:IsA("Sparkles")
@@ -49,13 +51,27 @@ local function globalCleanup()
                 d:Destroy()
 
             elseif d:IsA("SpecialMesh") then
-                d.TextureId = ""          -- remove textura, mantém shape do mesh
+                d.TextureId = ""
 
             elseif d:IsA("BasePart") then
-                d.Material   = Enum.Material.SmoothPlastic  -- low poly visual
+                d.Material   = Enum.Material.SmoothPlastic
                 d.CastShadow = false
             end
         end)
+        if i % CHUNK == 0 then task.wait() end
+    end
+end
+
+-- Deleta attachments do Terrain deixando exatamente 1
+local function cleanTerrainAttachments()
+    local terrain = WS:FindFirstChildOfClass("Terrain")
+    if not terrain then return end
+    local kept = false
+    for _, obj in ipairs(terrain:GetChildren()) do
+        if obj:IsA("Attachment") then
+            if not kept then kept = true
+            else obj:Destroy() end
+        end
     end
 end
 
@@ -66,7 +82,40 @@ local function del(parent, name)
     if obj then obj:Destroy() end
 end
 
--- ─── 3. TOWERS ──────────────────────────────────────────
+-- ─── 3. CLIENT UNITS (torres que andam) ────────────────
+
+local processedUnits = setmetatable({}, {__mode = "k"})
+
+local function processUnit(unit)
+    if processedUnits[unit] then return end
+    processedUnits[unit] = true
+
+    del(unit, "Animations")
+    del(unit, "AnimationController")
+    del(unit, "Display")
+
+    for _, d in ipairs(unit:GetDescendants()) do
+        pcall(function()
+            if  d:IsA("ParticleEmitter") or d:IsA("Fire")
+            or  d:IsA("Smoke") or d:IsA("Sparkles")
+            or  d:IsA("Trail") then
+                d.Enabled = false
+            elseif d:IsA("Sound") then
+                d:Destroy()
+            end
+        end)
+    end
+end
+
+local function scanUnits()
+    local folder = WS:FindFirstChild("ClientUnits")
+    if not folder then return end
+    for _, unit in ipairs(folder:GetChildren()) do
+        processUnit(unit)
+    end
+end
+
+-- ─── 4. TOWERS ──────────────────────────────────────────
 
 local processedTowers = setmetatable({}, {__mode = "k"})
 
@@ -75,7 +124,7 @@ local processedTowers = setmetatable({}, {__mode = "k"})
 local TOWER_DELETE = {
     "Animations",
     "AnimationController",
-    "Display",      -- UI flutuante acima da torre, geralmente pesada
+    "Display",
     "Queues",
 }
 
@@ -85,7 +134,6 @@ local function processTower(tower)
 
     for _, name in ipairs(TOWER_DELETE) do del(tower, name) end
 
-    -- Remove partículas e sons dentro da torre
     for _, d in ipairs(tower:GetDescendants()) do
         pcall(function()
             if  d:IsA("ParticleEmitter") or d:IsA("Fire")
@@ -113,12 +161,10 @@ local function scanTowers()
     end
 end
 
--- ─── 4. NPCS ────────────────────────────────────────────
+-- ─── 6. NPCS ────────────────────────────────────────────
 
 local processedNPCs = setmetatable({}, {__mode = "k"})
 
--- Remove animações e lógica dispensável
--- Mantém BodyMotor6D, corpo, física
 local NPC_DELETE = {
     "Animations",
     "AnimationController",
@@ -131,7 +177,6 @@ local function processNPC(npc)
 
     for _, name in ipairs(NPC_DELETE) do del(npc, name) end
 
-    -- Remove texturas/decais/partículas do corpo do NPC
     for _, d in ipairs(npc:GetDescendants()) do
         pcall(function()
             if  d:IsA("ParticleEmitter") or d:IsA("Fire")
@@ -161,13 +206,21 @@ local function scanNPCs()
     end
 end
 
--- ─── 5. MAIN ─────────────────────────────────────────────
+-- ─── 7. MAIN ─────────────────────────────────────────────
 
 applyGlobalSettings()
-task.spawn(globalCleanup)
+
+task.spawn(function()
+    task.wait(0.5)  cleanTerrainAttachments()
+    task.wait(0.5)  globalCleanup()
+    task.wait(0.5)  scanUnits()
+    task.wait(0.5)  scanTowers()
+    task.wait(0.5)  scanNPCs()
+end)
 
 while true do
+    task.wait(1)
+    scanUnits()
     scanTowers()
     scanNPCs()
-    task.wait(1)
 end
