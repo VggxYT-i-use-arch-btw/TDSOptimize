@@ -118,6 +118,7 @@ end
 -- ─── 4. TOWERS ──────────────────────────────────────────
 
 local processedTowers = setmetatable({}, {__mode = "k"})
+local pendingTowers   = setmetatable({}, {__mode = "k"})
 
 -- Só remove o que é ligado a animação/lógica pesada
 -- Mantém corpo, HRP, partes visuais
@@ -156,8 +157,16 @@ end
 local function scanTowers()
     local folder = WS:FindFirstChild("Towers")
     if not folder then return end
+    local now = tick()
     for _, tower in ipairs(folder:GetChildren()) do
-        processTower(tower)
+        if not processedTowers[tower] then
+            if not pendingTowers[tower] then
+                pendingTowers[tower] = now
+            elseif now - pendingTowers[tower] >= 2 then
+                pendingTowers[tower] = nil
+                processTower(tower)
+            end
+        end
     end
 end
 
