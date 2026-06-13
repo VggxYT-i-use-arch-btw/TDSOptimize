@@ -42,9 +42,11 @@ local function applyGlobalSettings()
     end)
 end
 
--- Remove partículas, destrói decais/texturas e força SmoothPlastic em tudo (roda uma vez)
+-- Remove partículas, texturas e força SmoothPlastic em chunks (sem travar no início)
 local function globalCleanup()
-    for _, d in ipairs(WS:GetDescendants()) do
+    local descendants = WS:GetDescendants()
+    local CHUNK = 80  -- processa 80 objetos por frame
+    for i, d in ipairs(descendants) do
         pcall(function()
             if  d:IsA("ParticleEmitter") or d:IsA("Fire")
             or  d:IsA("Smoke") or d:IsA("Sparkles")
@@ -62,6 +64,24 @@ local function globalCleanup()
                 d.CastShadow = false
             end
         end)
+        if i % CHUNK == 0 then task.wait() end  -- respira a cada chunk
+    end
+end
+
+-- Deleta attachments do Terrain deixando exatamente 1 (se deletar todos eles voltam)
+local function cleanTerrainAttachments()
+    local terrain = WS:FindFirstChildOfClass("Terrain")
+    if not terrain then return end
+    local attachments = terrain:GetChildren()
+    local kept = false
+    for _, obj in ipairs(attachments) do
+        if obj:IsA("Attachment") then
+            if not kept then
+                kept = true   -- preserva o primeiro, deleta o resto
+            else
+                obj:Destroy()
+            end
+        end
     end
 end
 
@@ -145,7 +165,56 @@ local function scanTowers()
     end
 end
 
--- ─── 4. NPCS ────────────────────────────────────────────
+-- ─── 4. CLIENT UNITS (torres que andam) ────────────────
+
+local processedUnits = setmetatable({}, {__mode = "k"})
+
+local UNIT_DELETE = {
+    "Animations", "AnimationController", "Display",
+    "Queues", "Weapon",
+}
+
+local UNIT_BODY_PARTS = {
+    "Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+    "UpperTorso", "LowerTorso",
+    "LeftUpperArm",  "LeftLowerArm",  "LeftHand",
+    "RightUpperArm", "RightLowerArm", "RightHand",
+    "LeftUpperLeg",  "LeftLowerLeg",  "LeftFoot",
+    "RightUpperLeg", "RightLowerLeg", "RightFoot",
+}
+
+local function processUnit(unit)
+    if processedUnits[unit] then return end
+    processedUnits[unit] = true
+
+    for _, name in ipairs(UNIT_DELETE)      do del(unit, name) end
+    for _, name in ipairs(UNIT_BODY_PARTS)  do del(unit, name) end
+
+    -- Invisibiliza tudo que sobrou
+    for _, part in ipairs(unit:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.Transparency = 1
+            part.CastShadow   = false
+        end
+    end
+
+    -- Solda placeholder no HRP igual aos NPCs (anda junto)
+    local hrp = unit:FindFirstChild("HumanoidRootPart", true)
+    if hrp then
+        hrp.Transparency = 1
+        makePlaceholder(unit, hrp, 1.25, 2, 1.25)
+    end
+end
+
+local function scanUnits()
+    local folder = WS:FindFirstChild("ClientUnits")
+    if not folder then return end
+    for _, unit in ipairs(folder:GetChildren()) do
+        processUnit(unit)
+    end
+end
+
+-- ─── 5. NPCS ────────────────────────────────────────────
 
 local processedNPCs = setmetatable({}, {__mode = "k"})
 
@@ -180,13 +249,22 @@ local function scanNPCs()
     end
 end
 
--- ─── 5. MAIN ─────────────────────────────────────────────
+-- ─── 6. MAIN ─────────────────────────────────────────────
 
 applyGlobalSettings()
-task.spawn(globalCleanup)  -- roda em paralelo sem travar o loop
+
+-- Startup distribuído: espalha o trabalho pesado em ~3s para não travar
+task.spawn(function()
+    task.wait(0.5)  cleanTerrainAttachments()
+    task.wait(0.5)  globalCleanup()   -- chunked internamente
+    task.wait(0.5)  scanTowers()
+    task.wait(0.5)  scanNPCs()
+    task.wait(0.5)  scanUnits()
+end)
 
 while true do
+    task.wait(1)
     scanTowers()
     scanNPCs()
-    task.wait(1)
+    scanUnits()
 end
